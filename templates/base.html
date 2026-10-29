@@ -22,7 +22,6 @@
   </a>
 
   <div class="cabecera__centro">
-    {# Distintivo permanente de la delegación activa: icono + código + nombre (no depende solo del color). #}
     <div class="distintivo" role="status" aria-live="polite" data-delegacion-activa="{{ delegacion_activa.codigo }}">
       {% icono "ubicacion" %}
       <span class="distintivo__etiqueta">Delegación activa</span>
@@ -84,6 +83,25 @@
 {% include "_mensajes.html" %}
 <script src="{% static 'vendor/sweetalert2/sweetalert2.all.min.js' %}"></script>
 <script src="{% static 'js/sgr.js' %}"></script>
+
+<!-- Script de búsqueda automática en tiempo real sin presionar Buscar -->
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const inputBusqueda = document.querySelector('input[data-busqueda-auto], input[name="q"]');
+    if (inputBusqueda) {
+        let temporizador;
+        inputBusqueda.addEventListener("input", function () {
+            clearTimeout(temporizador);
+            temporizador = setTimeout(() => {
+                if (this.form) {
+                    this.form.submit();
+                }
+            }, 400); // Filtra automáticamente 400ms después de dejar de escribir
+        });
+    }
+});
+</script>
+
 {% block scripts %}{% endblock %}
 </body>
 </html>

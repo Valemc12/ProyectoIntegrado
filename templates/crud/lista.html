@@ -17,24 +17,36 @@
 
 <section class="panel" aria-labelledby="titulo-listado">
   <h2 id="titulo-listado" class="sr-only">Listado de {{ titulo|lower }}</h2>
-  <form class="barra" method="get" data-busqueda role="search">
+  <form class="barra" method="get" data-busqueda role="search" id="form-filtro-tabla">
     <div class="busqueda">
       <label for="q">Búsqueda inteligente</label>
       <div class="con-icono">{% icono "lupa" %}
         <input class="campo-input" type="search" id="q" name="q" value="{{ q }}" maxlength="100"
-               placeholder="{{ m.placeholder_busqueda }}" aria-describedby="ayuda-busqueda">
+               placeholder="{{ m.placeholder_busqueda }}" aria-describedby="ayuda-busqueda" data-busqueda-auto>
       </div>
       <span id="ayuda-busqueda" class="sr-only">Coincidencia parcial en varios campos, sin distinguir mayúsculas.</span>
     </div>
     {% for f in filtros %}{% if f.opciones %}
       <div>
         <label for="f-{{ f.nombre }}">{{ f.etiqueta }}</label>
-        <select class="campo-select" id="f-{{ f.nombre }}" name="{{ f.nombre }}">
+        <select class="campo-select" id="f-{{ f.nombre }}" name="{{ f.nombre }}" onchange="this.form.submit()">
           {% if f.nombre == "ambito" %}{% else %}<option value="">Todos</option>{% endif %}
           {% for valor, texto in f.opciones %}<option value="{{ valor }}" {% if f.valor == valor|stringformat:"s" %}selected{% endif %}>{{ texto }}</option>{% endfor %}
         </select>
       </div>
     {% endif %}{% endfor %}
+
+    <!-- Selector dinámico de registros por página: 10 / 20 / 50 / 100 -->
+    <div>
+      <label for="limite">Mostrar</label>
+      <select class="campo-select" id="limite" name="limite" onchange="this.form.submit()">
+        <option value="10" {% if limite_actual == 10 %}selected{% endif %}>10 por pág.</option>
+        <option value="20" {% if limite_actual == 20 %}selected{% endif %}>20 por pág.</option>
+        <option value="50" {% if limite_actual == 50 %}selected{% endif %}>50 por pág.</option>
+        <option value="100" {% if limite_actual == 100 %}selected{% endif %}>100 por pág.</option>
+      </select>
+    </div>
+
     <button class="btn btn-neutro" type="submit">{% icono "lupa" "icono-sm" %}Buscar</button>
     {% if filtrado %}<a class="btn btn-neutro" href="?">Limpiar</a>{% endif %}
     {% if puede_exportar %}

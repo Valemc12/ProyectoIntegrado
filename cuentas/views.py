@@ -64,6 +64,20 @@ def ingresar(request):
                     cache.delete(clave_cache)
                     login(request, usuario, backend="cuentas.backends.UsuarioOCorreoBackend")
                     request.session[CLAVE_SESION] = usuario.delegaciones_autorizadas().order_by("codigo").first().pk
+                    
+                    # SI EL USUARIO TIENE PENDIENTE CAMBIAR LA CLAVE PROVISORIA
+                    if getattr(usuario, "debe_cambiar_clave", False):
+                        messages.warning(request, "Por seguridad, debe cambiar su contraseña provisoria antes de continuar.")
+                        solicitud, _ = SolicitudRecuperacion.crear(usuario)
+                        solicitud.verificado_en = timezone.now()
+                        solicitud.save()
+                        request.session[SESION_RECUPERACION] = {
+                            "token": solicitud.token,
+                            "correo": usuario.correo,
+                            "verificado": True,
+                        }
+                        return redirect("cuentas:nueva_clave")
+
                     messages.success(request, f"Bienvenido(a), {usuario.nombre}.")
                     destino = request.POST.get("next") or request.GET.get("next")
                     if destino and url_has_allowed_host_and_scheme(destino, {request.get_host()},
@@ -137,7 +151,6 @@ def solicitar_codigo(request):
             else:
                 log.warning("Límite de solicitudes de recuperación alcanzado para usuario %s", usuario.pk)
         ahora = timezone.now()
-        # El flujo es idéntico exista o no el correo: no se revela información de cuentas.
         request.session[SESION_RECUPERACION] = {
             "token": token,
             "correo": correo,
@@ -255,7 +268,8 @@ def nueva_clave(request):
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             usuario.set_password(form.cleaned_data["clave1"])
-            usuario.save(update_fields=["password"])
+            usuario.debe_cambiar_clave = False  # <--- DESACTIVA LA OBLIGATORIEDAD TRAS EL CAMBIO
+            usuario.save(update_fields=["password", "debe_cambiar_clave"])
             solicitud.usado_en = timezone.now()
             solicitud.save(update_fields=["usado_en"])
             usuario.solicitudes_recuperacion.filter(usado_en__isnull=True).update(anulado=True)
@@ -379,7 +393,6 @@ class UsuariosMantenedor(Mantenedor):
         Columna("Delegación", _delegaciones_usuario),
         Columna("Estado", "estado_texto", "estado"),
     ]
-    # Nunca se exportan contraseñas, tokens ni campos internos.
     columnas_excel = [("Nombre", "nombre"), ("Usuario", "username"), ("Correo", "correo"),
                       ("Rol", "rol.nombre"), ("Delegaciones autorizadas", _delegaciones_usuario),
                       ("Estado", "estado_texto"), ("Último ingreso", lambda u: u.last_login or "")]
@@ -400,8 +413,6 @@ class UsuariosMantenedor(Mantenedor):
         qs = Usuario.objects.select_related("rol").prefetch_related("delegaciones")
         if request.user.rol.es_global:
             return qs
-        # Fuera del alcance global solo se ven usuarios de la delegación activa
-        # y nunca cuentas de alcance global.
         return qs.filter(delegaciones=request.delegacion_activa).exclude(rol__alcance="GLOBAL")
 
     def filtrar(self, request):
@@ -422,6 +433,29 @@ class UsuariosMantenedor(Mantenedor):
         if obj.pk == request.user.pk:
             return "No puede desactivar su propia cuenta."
         return None
+
+    def despues_de_guardar(self, request, obj, creado):
+        """Si es un usuario nuevo, envía el correo con la clave provisoria."""
+        if creado and hasattr(obj, "_clave_provisoria_temp") and obj._clave_provisoria_temp:
+            try:
+                send_mail(
+                    "SGR La Serena · Bienvenida y Clave Provisoria",
+                    f"Hola {obj.nombre}:\n\n"
+                    f"Se ha creado su cuenta en el Sistema de Gestión de Requerimientos (SGR).\n\n"
+                    f"Sus credenciales de acceso son:\n"
+                    f" - Usuario: {obj.username}\n"
+                    f" - Contraseña provisoria: {obj._clave_provisoria_temp}\n\n"
+                    f"Al ingresar por primera vez, el sistema le solicitará cambiar esta contraseña por una definitiva.\n\n"
+                    f"Atentamente,\nIlustre Municipalidad de La Serena",
+                    None, [obj.correo],
+                )
+                messages.info(request, f"Se envió la contraseña provisoria al correo {obj.correo}.")
+            except Exception:
+                log.exception("Error al enviar correo de clave provisoria a %s", obj.correo)
+                messages.warning(
+                    request,
+                    f"Usuario creado, pero no se pudo enviar el correo a {obj.correo}. Clave provisoria: {obj._clave_provisoria_temp}"
+                )
 
 
 roles = RolesMantenedor()

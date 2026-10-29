@@ -6,13 +6,15 @@ from core.validadores import formatear_rut, normalizar_rut, validar_rut
 
 
 class Vecino(models.Model):
-    """Solicitante de la atención (catálogo de contexto en esta entrega)."""
+    """Solicitante de la atención."""
 
     rut = models.CharField("RUT", max_length=12, unique=True, validators=[validar_rut])
     nombre = models.CharField("Nombre completo", max_length=100)
     telefono = models.CharField("Teléfono", max_length=20, blank=True)
     correo = models.EmailField("Correo", max_length=120, blank=True)
     direccion = models.CharField("Dirección", max_length=150, blank=True)
+    # NUEVO CAMPO: Comuna por defecto "La Serena"
+    comuna = models.CharField("Comuna", max_length=60, default="La Serena", blank=True)
     creado = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -21,6 +23,8 @@ class Vecino(models.Model):
 
     def save(self, *args, **kwargs):
         self.rut = normalizar_rut(self.rut)
+        if not self.comuna:
+            self.comuna = "La Serena"
         super().save(*args, **kwargs)
 
     @property

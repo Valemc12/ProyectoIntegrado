@@ -74,6 +74,9 @@ class Usuario(AbstractBaseUser):
     delegaciones = models.ManyToManyField(
         Delegacion, blank=True, related_name="usuarios", verbose_name="Delegaciones autorizadas"
     )
+    # NUEVO CAMPO: Indica si el usuario debe cambiar su clave provisoria al primer ingreso
+    debe_cambiar_clave = models.BooleanField("Debe cambiar clave", default=True)
+    
     is_active = models.BooleanField("Estado", default=True)
     creado = models.DateTimeField(auto_now_add=True)
     actualizado = models.DateTimeField(auto_now=True)

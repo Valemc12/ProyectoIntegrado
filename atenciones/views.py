@@ -30,6 +30,9 @@ class AtencionForm(forms.Form):
     nombre = forms.CharField(label="Nombre completo", required=False, max_length=100)
     telefono = forms.CharField(label="Teléfono", required=False, max_length=20)
     correo = forms.EmailField(label="Correo", required=False, max_length=120)
+    # NUEVO CAMPO FORMULARIO: Comuna con valor por defecto "La Serena"
+    comuna = forms.CharField(label="Comuna", required=False, max_length=60, initial="La Serena")
+    
     tipo = forms.ModelChoiceField(label="Tipo de Atención", queryset=TipoAtencion.objects.filter(activo=True),
                                   empty_label="Seleccione un tipo…",
                                   error_messages={"required": "Seleccione el Tipo de Atención.",
@@ -56,6 +59,7 @@ class AtencionForm(forms.Form):
         for nombre in ("tipo", "subatencion", "descripcion"):
             self.fields[nombre].widget.attrs["required"] = True
         self.fields["rut"].widget.attrs["placeholder"] = "12.345.678-9"
+        self.fields["comuna"].widget.attrs["placeholder"] = "La Serena"
         self.fields["descripcion"].widget.attrs["placeholder"] = "Describa la solicitud y los antecedentes necesarios."
         tipo_id = self.data.get("tipo") if self.is_bound else None
         if tipo_id and str(tipo_id).isdigit():
@@ -82,6 +86,8 @@ class AtencionForm(forms.Form):
             if len(nombre) < 3:
                 self.add_error("nombre", "Ingrese el nombre del vecino (mínimo 3 caracteres).")
             datos["nombre"] = nombre
+            if not datos.get("comuna"):
+                datos["comuna"] = "La Serena"
         elif not datos.get("vecino"):
             self.add_error("vecino", "Busque y seleccione al vecino o solicitante.")
         tipo, sub = datos.get("tipo"), datos.get("subatencion")
@@ -105,7 +111,6 @@ def crear_atencion(request):
         token = request.POST.get("token", "")
         previa = Atencion.objects.filter(token_envio=token).first() if token else None
         if previa:
-            # Doble envío del mismo formulario: no se crea un segundo registro.
             messages.warning(request, f"Esta atención ya fue registrada con el folio {previa.folio}.")
             return redirect("atenciones:detalle", previa.pk)
         if token not in request.session.get(SESION_TOKENS, []):
@@ -118,13 +123,16 @@ def crear_atencion(request):
                 with transaction.atomic():
                     vecino = datos["vecino"]
                     if datos["modo_vecino"] == "nuevo":
-                        vecino = Vecino.objects.create(rut=normalizar_rut(datos["rut"]), nombre=datos["nombre"],
-                                                       telefono=datos.get("telefono", ""),
-                                                       correo=datos.get("correo", ""))
+                        vecino = Vecino.objects.create(
+                            rut=normalizar_rut(datos["rut"]),
+                            nombre=datos["nombre"],
+                            telefono=datos.get("telefono", ""),
+                            correo=datos.get("correo", ""),
+                            comuna=datos.get("comuna", "La Serena") or "La Serena"
+                        )
                     atencion = Atencion.objects.create(
                         vecino=vecino, tipo=datos["tipo"], subatencion=datos["subatencion"],
                         descripcion=datos["descripcion"].strip(),
-                        # Delegación y responsable salen del contexto validado en el servidor.
                         delegacion=request.delegacion_activa,
                         responsable=request.user,
                         token_envio=token,
@@ -146,7 +154,7 @@ def crear_atencion(request):
                 messages.success(request, f"Atención registrada correctamente. Folio: {atencion.folio}")
                 return redirect("atenciones:detalle", atencion.pk)
     else:
-        form = AtencionForm(initial={"token": _nuevo_token(request), "modo_vecino": "existente"})
+        form = AtencionForm(initial={"token": _nuevo_token(request), "modo_vecino": "existente", "comuna": "La Serena"})
     vecino_sel = None
     if form.is_bound and form.data.get("vecino", "").isdigit():
         vecino_sel = Vecino.objects.filter(pk=form.data["vecino"]).first()
@@ -208,6 +216,7 @@ class AtencionesMantenedor(Mantenedor):
                       ("Responsable", "responsable.nombre")]
     detalle = [("Folio", "folio"), ("Fecha y hora de registro", "fecha_registro"),
                ("Vecino o solicitante", "vecino"), ("Teléfono", "vecino.telefono"), ("Correo", "vecino.correo"),
+               ("Comuna", "vecino.comuna"),
                ("Tipo de Atención", "tipo"), ("Sub Atención", "subatencion"), ("Descripción", "descripcion"),
                ("Delegación", "delegacion"), ("Usuario responsable", "responsable")]
     filtros = [Filtro("tipo", "Tipo", _opciones_tipos, lambda qs, v: qs.filter(tipo_id=v))]
@@ -215,7 +224,6 @@ class AtencionesMantenedor(Mantenedor):
 
     def queryset(self, request):
         qs = Atencion.objects.select_related("vecino", "tipo", "subatencion", "delegacion", "responsable")
-        # Solo las atenciones de la delegación activa (validada en el servidor).
         return qs.filter(delegacion=request.delegacion_activa)
 
     def contexto_base(self, request, **extra):

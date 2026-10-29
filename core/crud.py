@@ -126,8 +126,6 @@ class FormularioBase(forms.ModelForm):
         return datos
 
     def validate_unique(self):
-        # Los duplicados (incluidas restricciones sin distinguir mayúsculas)
-        # se validan en clean() con mensajes asociados al campo.
         pass
 
 
@@ -151,13 +149,10 @@ class Mantenedor:
     placeholder_busqueda = "Buscar por código, nombre u otro campo…"
     ayuda_lista = ""
 
-    # --- Reglas que cada mantenedor puede ajustar -------------------------
     def queryset(self, request):
-        """Registros visibles para el usuario (alcance por perfil y delegación)."""
         return self.model.objects.all()
 
     def motivo_no_eliminar(self, request, obj):
-        """Devuelve un texto si el registro no puede eliminarse (relaciones, reglas)."""
         return None
 
     def motivo_no_cambiar_estado(self, request, obj):
@@ -175,7 +170,6 @@ class Mantenedor:
     def acciones_extra(self, request, obj):
         return []
 
-    # --- Utilidades -------------------------------------------------------
     @property
     def nombre_modulo(self):
         return NOMBRE_MODULO.get(self.modulo, self.titulo)
@@ -187,7 +181,6 @@ class Mantenedor:
         try:
             return self.queryset(request).get(pk=pk)
         except (self.model.DoesNotExist, ValueError, TypeError):
-            # Fuera de alcance o inexistente: no se revela cuál de los dos.
             raise Http404("Registro no encontrado o fuera de su alcance autorizado.")
 
     def filtrar(self, request):
@@ -236,7 +229,14 @@ class Mantenedor:
     # --- Vistas -----------------------------------------------------------
     def vista_lista(self, request):
         qs, q, valores = self.filtrar(request)
-        paginador = Paginator(qs, self.por_pagina)
+        
+        # Paginación configurable [10 | 20 | 50 | 100]
+        limite_raw = request.GET.get("limite")
+        por_pagina = self.por_pagina
+        if limite_raw and limite_raw.isdigit() and int(limite_raw) in (10, 20, 50, 100):
+            por_pagina = int(limite_raw)
+
+        paginador = Paginator(qs, por_pagina)
         pagina = paginador.get_page(request.GET.get("pagina"))
         parametros = request.GET.copy()
         parametros.pop("pagina", None)
@@ -256,6 +256,7 @@ class Mantenedor:
             filtrado=bool(q or valores),
             parametros=parametros.urlencode(),
             columnas=self.columnas,
+            limite_actual=por_pagina,
         )
         ctx.update(self.contexto_extra(request))
         return render(request, self.plantilla_lista, ctx)
@@ -385,7 +386,6 @@ class Mantenedor:
         respuesta["Content-Disposition"] = f'attachment; filename="{nombre}"'
         return respuesta
 
-    # --- Rutas ------------------------------------------------------------
     def urls(self):
         p = self.modulo
 

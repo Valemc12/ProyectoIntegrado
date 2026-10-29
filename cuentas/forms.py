@@ -1,4 +1,5 @@
 import re
+import secrets
 
 from django import forms
 from django.contrib.auth.password_validation import validate_password
@@ -123,7 +124,6 @@ class RolForm(FormularioBase):
             datos["alcance"], datos["activo"] = "GLOBAL", True
             return datos
         permisos = set(datos.get("permisos") or [])
-        # Cualquier acción sobre un módulo implica poder verlo.
         permisos |= {p.split(".")[0] + ".ver" for p in permisos}
         if permisos and "inicio.ver" not in permisos:
             permisos.add("inicio.ver")
@@ -180,13 +180,14 @@ class UsuarioForm(FormularioBase):
         self.fields["username"].widget.attrs.update({"pattern": "[A-Za-z0-9._-]{3,30}", "autocomplete": "off"})
         for nombre in ("clave1", "clave2"):
             self.fields[nombre].widget.attrs["class"] = "campo-input"
+        
         if self.instance.pk:
             self.fields["clave1"].label = "Nueva contraseña (opcional)"
             self.fields["clave1"].help_text = "Déjela en blanco para mantener la contraseña actual."
         else:
-            for nombre in ("clave1", "clave2"):
-                self.fields[nombre].required = True
-                self.fields[nombre].widget.attrs["required"] = True
+            self.fields["clave1"].label = "Contraseña provisoria (Opcional)"
+            self.fields["clave1"].help_text = "Si se deja en blanco, el sistema generará una provisoria automáticamente y se la enviará por correo."
+
         if self.instance.pk and self.instance.pk == editor.pk:
             self.fields["rol"].disabled = True
             self.fields["is_active"].disabled = True
@@ -232,8 +233,18 @@ class UsuarioForm(FormularioBase):
     def save(self, commit=True):
         fuera = self._delegaciones_fuera_de_alcance()
         usuario = super().save(commit=False)
-        if self.cleaned_data.get("clave1"):
-            usuario.set_password(self.cleaned_data["clave1"])
+        
+        clave_provisoria = self.cleaned_data.get("clave1")
+        if not clave_provisoria and not usuario.pk:
+            clave_provisoria = secrets.token_urlsafe(8)
+            usuario.debe_cambiar_clave = True
+
+        if clave_provisoria:
+            usuario.set_password(clave_provisoria)
+
         usuario.save()
         usuario.delegaciones.set(list(self.cleaned_data.get("delegaciones") or []) + fuera)
+        
+        # Guardamos la clave generada en una propiedad temporal para usarla en el envío de correo
+        usuario._clave_provisoria_temp = clave_provisoria if not self.instance.pk else None
         return usuario
